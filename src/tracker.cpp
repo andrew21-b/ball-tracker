@@ -1,10 +1,13 @@
 #include "tracker.hpp"
 
-const cv::Scalar BALL_LOWER_HSV(30, 50, 50);
-const cv::Scalar BALL_UPPER_HSV(80, 255, 255);
 const int MIN_BALL_AREA = 500;
 
-BallTracker::BallTracker(DetectionMode mode) : mode(mode) {}
+BallTracker::BallTracker(DetectionMode mode) : mode(mode)
+{
+    hsvLower = cv::Scalar(30, 50, 50);
+    hsvUpper = cv::Scalar(80, 255, 255);
+    circularityThreshold = 0.7;
+}
 
 cv::Mat BallTracker::preprocessFrame(const cv::Mat &frame)
 {
@@ -14,15 +17,22 @@ cv::Mat BallTracker::preprocessFrame(const cv::Mat &frame)
     {
         cv::Mat hsv;
         cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
-        cv::inRange(hsv, BALL_LOWER_HSV, BALL_UPPER_HSV, output);
+        cv::inRange(hsv, hsvLower, hsvUpper, output);
 
         cv::erode(output, output, cv::Mat(), cv::Point(-1, -1), 2);
         cv::dilate(output, output, cv::Mat(), cv::Point(-1, -1), 2);
     }
     else if (mode == DetectionMode::GRAYSCALE)
     {
-        cv::cvtColor(frame, output, cv::COLOR_BGR2GRAY);
-        cv::GaussianBlur(output, output, cv::Size(9, 9), 2, 2);
+        cv::Mat gray;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+        cv::GaussianBlur(gray, gray, cv::Size(9, 9), 0);
+
+        cv::Mat edges;
+        cv::Canny(gray, edges, 8, 35);
+
+        output = edges.clone();
     }
     return output;
 }
@@ -44,42 +54,80 @@ cv::Point2f BallTracker::detectContours(const cv::Mat &mask, cv::Mat &outputFram
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    cv::Point2f center(-1, -1);
-    float radius = 0;
+    cv::Point2f bestCenter(-1, -1);
+    float bestRadius = -1;
+    double bestScore = 1e9;
 
     for (const auto &contour : contours)
     {
-        float area = cv::contourArea(contour);
-        if (area > MIN_BALL_AREA)
+        double area = cv::contourArea(contour);
+        if (area < MIN_BALL_AREA)
+            continue;
+
+        cv::Point2f center;
+        float radius;
+        cv::minEnclosingCircle(contour, center, radius);
+
+        double perimeter = cv::arcLength(contour, true);
+        if (perimeter == 0)
+            continue;
+
+        double circularity = 4 * CV_PI * area / (perimeter * perimeter);
+        if (circularity < 0.5 * circularityThreshold)
+            continue;
+
+        cv::Mat maskImg = cv::Mat::zeros(mask.size(), CV_8U);
+        std::vector<std::vector<cv::Point>> singleContour = {contour};
+        cv::drawContours(maskImg, singleContour, 0, 255, -1);
+        cv::Scalar meanVal = cv::mean(mask, maskImg);
+        if (meanVal[0] > 200)
+            continue;
+
+        if (radius > bestRadius || meanVal[0] < bestScore)
         {
-            cv::minEnclosingCircle(contour, center, radius);
-            if (radius > 5)
-            {
-                cv::circle(outputFrame, center, (int)radius, cv::Scalar(0, 0, 255), 2);
-                cv::circle(outputFrame, center, 2, cv::Scalar(255, 0, 0), -1);
-            }
+            bestRadius = radius;
+            bestCenter = center;
+            bestScore = meanVal[0];
         }
+        cv::circle(outputFrame, center, (int)radius, cv::Scalar(0, 255, 0), 2);
+        cv::circle(outputFrame, center, 2, cv::Scalar(0, 0, 255), -1);
     }
-    return center;
+
+    return bestCenter;
 }
 
-cv::Point2f BallTracker::detectCircles(const cv::Mat &gray, cv::Mat &outputFrame)
+cv::Point2f BallTracker::detectCircles(const cv::Mat &edges, cv::Mat &outputFrame)
 {
+    cv::Mat dilatedEdges;
+    cv::dilate(edges, dilatedEdges, cv::Mat(), cv::Point(-1, -1), 4);
+
     std::vector<cv::Vec3f> circles;
-    cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, 1,
-                     gray.rows / 8,
-                     100, 30,
-                     10, 100);
+    cv::HoughCircles(dilatedEdges, circles, cv::HOUGH_GRADIENT, 1,
+                     dilatedEdges.rows / 8,
+                     80, 20,
+                     60, 140);
 
     cv::Point2f center(-1, -1);
+    float bestRadius = -1;
 
     for (size_t i = 0; i < circles.size(); i++)
     {
-        cv::Vec3i c = circles[i];
-        center = cv::Point2f(c[0], c[1]);
-        int radius = c[2];
-        cv::circle(outputFrame, center, radius, cv::Scalar(0, 0, 255), 2);
-        cv::circle(outputFrame, center, 2, cv::Scalar(255, 0, 0), 3);
+        cv::Vec3f c = circles[i];
+        cv::Point2f candidateCenter(c[0], c[1]);
+        float radius = c[2];
+        if (radius < 60 || radius > 140)
+            continue;
+        if (radius > bestRadius)
+        {
+            bestRadius = radius;
+            center = candidateCenter;
+        }
+    }
+
+    if (center.x >= 0 && center.y >= 0 && bestRadius > 0)
+    {
+        cv::circle(outputFrame, center, (int)bestRadius, cv::Scalar(0, 255, 0), 2);
+        cv::circle(outputFrame, center, 2, cv::Scalar(0, 0, 255), 3);
     }
     return center;
 }

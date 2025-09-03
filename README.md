@@ -13,7 +13,15 @@ Designed as a stepping stone project toward **sports technology applications** (
 
 ## Build
 ```bash
-mkdir build && cd build
+mkdir build
+cd build
 cmake ..
-make
-./ball_tracker
+cd ..
+cmake --build .\build\ --config Debug
+```
+
+
+## Run
+```bash
+.\build\Debug\ball_tracker.exe
+```
