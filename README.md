@@ -11,6 +11,10 @@ Designed as a stepping stone project toward **sports technology applications** (
 - Trajectory visualization
 - FPS counter
 
+## Prerequisites
+To get this application to build and run you need OpenCV installed on your machine and CMake.
+
+
 ## Build
 ```bash
 mkdir build
