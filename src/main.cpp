@@ -86,17 +86,17 @@ int main()
 
         cv::Mat trackerFrame = flippedFrame.clone();
 
-        cv::Point2f center = tracker.detectBall(processed, flippedFrame);
+        cv::Point2f center = tracker.detectBall(processed, trackerFrame);
 
         if (center.x > 0 && center.y > 0)
         {
-            tracker.drawTrajectory(flippedFrame, center);
+            tracker.drawTrajectory(trackerFrame, center);
             std::cout << "Ball detected at: (" << center.x << ", " << center.y << ")" << std::endl;
         }
 
         int64_t endTime = cv::getTickCount();
         double fps = tracker.computeFPS(startTime, endTime);
-        drawFPS(flippedFrame, fps);
+        drawFPS(trackerFrame, fps);
 
         cv::Mat debugView = makeDebugView(flippedFrame, processed, edges, trackerFrame);
         cv::imshow("Debug View (Raw | Processed | Edges | Tracker)", debugView);
